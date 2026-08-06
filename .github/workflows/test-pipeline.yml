@@ -1,0 +1,73 @@
+name: Test Clip Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: "Pixeldrain (or direct) video URL"
+        required: true
+        type: string
+      srt_url:
+        description: "Raw URL to the .srt/.ass subtitle file (e.g. Gist raw_url)"
+        required: true
+        type: string
+      drama_name:
+        description: "Drama name (for Gemini prompt context)"
+        required: true
+        type: string
+
+jobs:
+  test-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+
+      - name: Install Python deps
+        run: pip install --quiet google-generativeai
+
+      - name: Step 1a - Download video
+        run: python scripts/download_video.py "${{ inputs.video_url }}" work/input_video.mp4
+
+      - name: Step 1b - Download subtitle
+        run: python scripts/download_subtitle.py "${{ inputs.srt_url }}" work/subs.srt
+
+      - name: Step 1c - Parse subtitle
+        run: python scripts/parse_subtitle.py work/subs.srt work/dialogue.json
+
+      - name: Step 2a - Detect scene changes
+        run: python scripts/detect_scenes.py work/input_video.mp4 work/scenes.json
+
+      - name: Step 2b - Detect audio spikes
+        run: python scripts/detect_audio_spikes.py work/input_video.mp4 work/audio_spikes.json
+
+      - name: Step 2c - Gemini moment detection
+        run: |
+          python scripts/gemini_moment_detect.py \
+            work/dialogue.json work/scenes.json work/audio_spikes.json \
+            work/moments.json "${{ inputs.drama_name }}"
+
+      - name: Show results
+        run: |
+          echo "=== Parsed dialogue count ==="
+          python3 -c "import json; print(len(json.load(open('work/dialogue.json'))))"
+          echo "=== Scene changes found ==="
+          python3 -c "import json; print(len(json.load(open('work/scenes.json'))['scene_change_timestamps']))"
+          echo "=== Audio spikes found ==="
+          python3 -c "import json; print(len(json.load(open('work/audio_spikes.json'))['audio_spike_timestamps']))"
+          echo "=== Selected clip moments ==="
+          cat work/moments.json
+
+      - name: Upload results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-test-results
+          path: work/
+          retention-days: 3
