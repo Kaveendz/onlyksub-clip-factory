@@ -12,14 +12,14 @@ import subprocess
 import sys
 
 
-def detect_audio_spikes(video_path: str, window: float = 1.0, spike_db: float = -12.0) -> list[float]:
+def detect_audio_spikes(video_path: str, window: float = 1.0, spike_db: float = -20.0) -> list[float]:
     """
     Runs ffmpeg astats per-window RMS level and returns timestamps (seconds)
     where the RMS level exceeds spike_db (i.e. a loud moment).
     """
     cmd = [
         "ffmpeg", "-i", video_path,
-        "-af", f"astats=metadata=1:reset={window},ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
+        "-af", f"astats=metadata=1:reset={window},ametadata=print:key=lavfi.astats.Overall.RMS_level",
         "-f", "null", "-",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
