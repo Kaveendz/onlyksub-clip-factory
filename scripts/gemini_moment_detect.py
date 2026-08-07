@@ -12,8 +12,10 @@ Requires env var: GEMINI_API_KEY
 import json
 import os
 import sys
+import time
 
-import google.generativeai as genai
+from google import genai
+from google.genai.errors import ClientError
 
 CURIOSITY_GAP_PROMPT = """You are selecting short-form clip moments from a K-drama episode.
 
@@ -78,8 +80,7 @@ def detect_moments(dialogue_path, scenes_path, audio_path, drama_name):
     if not api_key:
         print("ERROR: GEMINI_API_KEY env var not set.", file=sys.stderr)
         sys.exit(1)
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-3.5-flash")
+    client = genai.Client(api_key=api_key)
 
     prompt = CURIOSITY_GAP_PROMPT.format(
         drama_name=drama_name,
@@ -88,9 +89,26 @@ def detect_moments(dialogue_path, scenes_path, audio_path, drama_name):
         audio_json=json.dumps(audio),
     )
 
-    response = model.generate_content(prompt)
+    model_name = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    last_err = None
+    response = None
+    for attempt in range(4):
+        try:
+            response = client.models.generate_content(model=model_name, contents=prompt)
+            break
+        except ClientError as e:
+            last_err = e
+            if getattr(e, "code", None) == 429:
+                wait = 20 * (attempt + 1)
+                print(f"Rate limited, retrying in {wait}s...", file=sys.stderr)
+                time.sleep(wait)
+                continue
+            raise
+    if response is None:
+        print(f"ERROR: Gemini call failed after retries: {last_err}", file=sys.stderr)
+        sys.exit(1)
+
     raw_text = response.text.strip()
-    # strip markdown fences if the model added them anyway
     if raw_text.startswith("```"):
         raw_text = raw_text.strip("`")
         if raw_text.lower().startswith("json"):
@@ -102,7 +120,6 @@ def detect_moments(dialogue_path, scenes_path, audio_path, drama_name):
         print(f"ERROR: could not parse Gemini output as JSON:\n{raw_text}", file=sys.stderr)
         sys.exit(1)
 
-    # filter: only keep strong candidates
     filtered = [
         m for m in moments
         if m.get("hook_score", 0) >= 7 and m.get("cliffhanger_score", 0) >= 6
