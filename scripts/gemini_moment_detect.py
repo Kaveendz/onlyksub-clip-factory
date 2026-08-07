@@ -89,7 +89,7 @@ def detect_moments(dialogue_path, scenes_path, audio_path, drama_name):
         audio_json=json.dumps(audio),
     )
 
-    model_name = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    model_name = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
     last_err = None
     response = None
     for attempt in range(4):
