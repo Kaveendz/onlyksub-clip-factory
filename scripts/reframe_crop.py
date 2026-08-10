@@ -1,9 +1,9 @@
 """
 Step 3b: Reframe a 16:9 clip to 9:16 for short-form platforms.
 
-Uses Mediapipe face detection to track the most prominent face and
-follow it with a smoothed crop window. Falls back to a plain center-crop
-if no face is confidently detected (wide shots, action scenes).
+Uses OpenCV Haar Cascade face detection to track the most prominent face
+and center the crop window on it. Falls back to a plain center-crop if
+no face is confidently detected (wide shots, action scenes).
 
 Usage:
     python scripts/reframe_crop.py clip_1.mp4 clip_1_vertical.mp4
@@ -12,12 +12,11 @@ import subprocess
 import sys
 
 import cv2
-import mediapipe as mp
 import numpy as np
 
-mp_face = mp.solutions.face_detection
-
-SMOOTHING_WINDOW = 15
+FACE_CASCADE = cv2.CascadeClassifier(
+    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+)
 
 
 def get_video_dims(path: str) -> tuple[int, int, float]:
@@ -29,51 +28,30 @@ def get_video_dims(path: str) -> tuple[int, int, float]:
     return w, h, fps
 
 
-def detect_face_centers(video_path: str, sample_every: int = 3) -> list[tuple[int, float, float]]:
+def detect_face_centers(video_path: str, sample_every: int = 5) -> list[tuple[int, float, float]]:
     cap = cv2.VideoCapture(video_path)
     centers = []
     frame_idx = 0
 
-    with mp_face.FaceDetection(model_selection=1, min_detection_confidence=0.5) as detector:
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            if frame_idx % sample_every == 0:
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                results = detector.process(rgb)
-                if results.detections:
-                    best = max(
-                        results.detections,
-                        key=lambda d: d.location_data.relative_bounding_box.width
-                        * d.location_data.relative_bounding_box.height,
-                    )
-                    box = best.location_data.relative_bounding_box
-                    cx = box.xmin + box.width / 2
-                    cy = box.ymin + box.height / 2
-                    centers.append((frame_idx, cx, cy))
-            frame_idx += 1
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if frame_idx % sample_every == 0:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            h, w = gray.shape
+            faces = FACE_CASCADE.detectMultiScale(
+                gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60)
+            )
+            if len(faces) > 0:
+                fx, fy, fw, fh = max(faces, key=lambda f: f[2] * f[3])
+                cx = (fx + fw / 2) / w
+                cy = (fy + fh / 2) / h
+                centers.append((frame_idx, cx, cy))
+        frame_idx += 1
 
     cap.release()
     return centers
-
-
-def smooth_centers(centers: list[tuple[int, float, float]], total_frames: int) -> list[float]:
-    if not centers:
-        return []
-
-    per_frame = np.full(total_frames, 0.5)
-    last_x = 0.5
-    ci = 0
-    for f in range(total_frames):
-        if ci < len(centers) and centers[ci][0] == f:
-            last_x = centers[ci][1]
-            ci += 1
-        per_frame[f] = last_x
-
-    kernel = np.ones(SMOOTHING_WINDOW) / SMOOTHING_WINDOW
-    smoothed = np.convolve(per_frame, kernel, mode="same")
-    return smoothed.tolist()
 
 
 def reframe_video(input_path: str, output_path: str) -> bool:
@@ -89,15 +67,14 @@ def reframe_video(input_path: str, output_path: str) -> bool:
     cap.release()
 
     centers = detect_face_centers(input_path)
-    detection_rate = len(centers) / max(1, total_frames / 3)
+    sampled_frames = max(1, total_frames // 5)
+    detection_rate = len(centers) / sampled_frames
 
     if detection_rate < 0.15:
         _center_crop(input_path, output_path, w, h)
         return False
 
-    smoothed = smooth_centers(centers, total_frames)
-
-    median_cx_ratio = float(np.median(smoothed)) if smoothed else 0.5
+    median_cx_ratio = float(np.median([c[1] for c in centers]))
     crop_x = int(median_cx_ratio * w - target_w / 2)
     crop_x = max(0, min(w - target_w, crop_x))
 
