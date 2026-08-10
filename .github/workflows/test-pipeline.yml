@@ -30,7 +30,10 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
 
       - name: Install Python deps
-        run: pip uninstall -y opencv-python opencv-contrib-python opencv-python-headless 2>/dev/null; pip install --quiet google-genai opencv-python-headless numpy
+        run: |
+          pip uninstall -y opencv-python opencv-contrib-python opencv-python-headless || true
+          pip install --quiet --force-reinstall --no-cache-dir google-genai opencv-python-headless numpy
+          python3 -c "import cv2; print(cv2.__version__); print(hasattr(cv2, 'CascadeClassifier'))"
 
       - name: Step 1a - Download video
         run: python scripts/download_video.py "${{ inputs.video_url }}" work/input_video.mp4
