@@ -1,4 +1,4 @@
 google-genai
-opencv-python-headless
+opencv-python-headless<5
 mediapipe
 numpy

@@ -32,7 +32,7 @@ jobs:
       - name: Install Python deps
         run: |
           pip uninstall -y opencv-python opencv-contrib-python opencv-python-headless || true
-          pip install --quiet --force-reinstall --no-cache-dir google-genai opencv-python-headless numpy
+          pip install --quiet --force-reinstall --no-cache-dir google-genai "opencv-python-headless<5" numpy
           python3 -c "import cv2; print(cv2.__version__); print(hasattr(cv2, 'CascadeClassifier'))"
 
       - name: Step 1a - Download video
