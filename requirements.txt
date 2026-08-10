@@ -1,1 +1,4 @@
 google-genai
+opencv-python-headless
+mediapipe
+numpy

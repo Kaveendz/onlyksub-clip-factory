@@ -30,7 +30,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
 
       - name: Install Python deps
-        run: pip install --quiet google-genai
+        run: pip install --quiet google-genai opencv-python-headless mediapipe numpy
 
       - name: Step 1a - Download video
         run: python scripts/download_video.py "${{ inputs.video_url }}" work/input_video.mp4
@@ -53,6 +53,54 @@ jobs:
             work/dialogue.json work/scenes.json work/audio_spikes.json \
             work/moments.json "${{ inputs.drama_name }}"
 
+      - name: Step 3a - Cut clips
+        run: python scripts/cut_clips.py work/input_video.mp4 work/moments.json work/clips_raw
+
+      - name: Step 3b - Reframe to 9:16 (face-tracking + fallback)
+        run: |
+          mkdir -p work/clips_vertical
+          i=1
+          for f in work/clips_raw/clip_*.mp4; do
+            python scripts/reframe_crop.py "$f" "work/clips_vertical/clip_${i}.mp4"
+            i=$((i+1))
+          done
+
+      - name: Step 3c - Build per-clip subtitles + burn
+        run: |
+          mkdir -p work/clips_final
+          python3 - << 'PYEOF'
+          import json, subprocess
+
+          moments = json.load(open("work/moments.json"))
+          for i, m in enumerate(moments, start=1):
+              ass_path = f"work/clip_{i}.ass"
+              subprocess.run([
+                  "python", "scripts/make_clip_ass.py",
+                  "work/dialogue.json", m["start"], m["end"],
+                  ass_path, "Noto Sans Sinhala", "56",
+              ], check=True)
+              subprocess.run([
+                  "python", "scripts/burn_clip_subs.py",
+                  f"work/clips_vertical/clip_{i}.mp4", ass_path,
+                  f"work/clips_final/clip_{i}.mp4", "fonts",
+              ], check=True)
+          PYEOF
+
+      - name: Step 3d - Generate captions per clip
+        run: |
+          python3 - << 'PYEOF'
+          import json, subprocess
+
+          moments = json.load(open("work/moments.json"))
+          for i, m in enumerate(moments, start=1):
+              subprocess.run([
+                  "python", "scripts/generate_captions.py",
+                  "${{ inputs.drama_name }}", m.get("reason", m.get("text", "")),
+                  m.get("emotion_type", "suspense"),
+                  f"work/clip_{i}_captions.json",
+              ], check=True)
+          PYEOF
+
       - name: Show results
         run: |
           echo "=== Parsed dialogue count ==="
@@ -63,6 +111,10 @@ jobs:
           python3 -c "import json; print(len(json.load(open('work/audio_spikes.json'))['audio_spike_timestamps']))"
           echo "=== Selected clip moments ==="
           cat work/moments.json
+          echo "=== Final clips ==="
+          ls -lh work/clips_final/
+          echo "=== Sample captions (clip 1) ==="
+          cat work/clip_1_captions.json || true
 
       - name: Upload results as artifact
         if: always()
