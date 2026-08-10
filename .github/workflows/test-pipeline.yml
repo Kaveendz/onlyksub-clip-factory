@@ -124,5 +124,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pipeline-test-results
-          path: work/
+          path: |
+            work/clips_final/
+            work/*_captions.json
           retention-days: 3
