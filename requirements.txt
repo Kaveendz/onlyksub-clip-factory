@@ -1,4 +1,1 @@
-google-genai
-opencv-python-headless<5
-mediapipe
-numpy
+numpy>=1.24
