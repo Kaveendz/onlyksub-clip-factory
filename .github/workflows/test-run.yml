@@ -1,0 +1,86 @@
+name: Test Run (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: "Pixeldrain share link or direct video URL"
+        required: true
+        type: string
+      srt_url:
+        description: "Raw URL of the .srt/.ass (e.g. secret-gist raw URL)"
+        required: false
+        type: string
+      drama_name:
+        description: "Drama name"
+        required: false
+        type: string
+        default: "Test"
+      source_status:
+        description: "Do you have the rights to this content?"
+        required: true
+        type: choice
+        options: [unknown, permitted, licensed]
+        default: unknown
+      clip_count:
+        description: "How many clips"
+        required: false
+        type: string
+        default: "6"
+      modes:
+        description: "Layouts: blur (9:16), wide (16:9) or blur,wide"
+        required: false
+        type: string
+        default: "blur,wide"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+      - run: pip install -r requirements.txt
+
+      - name: Run clip factory
+        env:
+          VIDEO_URL: ${{ inputs.video_url }}
+          SRT_URL: ${{ inputs.srt_url }}
+          DRAMA: ${{ inputs.drama_name }}
+          STATUS: ${{ inputs.source_status }}
+          CLIPS: ${{ inputs.clip_count }}
+          MODES: ${{ inputs.modes }}
+        run: |
+          args=(--video "$VIDEO_URL" --drama "$DRAMA" --source-status "$STATUS"
+                --clips "$CLIPS" --modes "$MODES" --workdir work)
+          if [ -n "$SRT_URL" ]; then args+=(--srt "$SRT_URL"); fi
+          python -m clipfactory run "${args[@]}"
+
+      - name: Summary
+        if: always()
+        run: |
+          [ -f work/report.json ] && python - <<'PY'
+          import json
+          r = json.load(open("work/report.json"))
+          print("needs_review:", r["needs_review"], "|", r["summary"])
+          for c in r["clips"]:
+              print(f'#{c["rank"]}  {c["start"]} -> {c["end"]}  ({c["duration"]}s)  score {c["score"]}')
+              for m, q in c["qa"].items():
+                  print("     ", m, "OK" if q["ok"] else q["problems"])
+          PY
+          ls -lh work/clips 2>/dev/null || true
+
+      - name: Upload clips + diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clips-and-report
+          path: |
+            work/clips/
+            work/report.json
+            work/candidates.json
+            work/signals.json
+            work/dialogue.json
+          retention-days: 3
